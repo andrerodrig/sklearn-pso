@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from __future__ import division
 import os
 import warnings
@@ -10,8 +9,9 @@ import random
 from collections import defaultdict
 from sklearn.base import clone, is_classifier
 from sklearn.model_selection._validation import _fit_and_score
-from sklearn.model_selection._search import BaseSearchCV, check_cv, _check_param_grid
-from sklearn.metrics.scorer import check_scoring, _check_multimetric_scoring
+from sklearn.model_selection._search import BaseSearchCV, check_cv
+from sklearn.metrics import check_scoring
+from sklearn.metrics._scorer import _check_multimetric_scoring
 from sklearn.utils.validation import _num_samples, indexable
 from itertools import product
 import logging
@@ -135,13 +135,34 @@ class PSOSearchCV(BaseSearchCV):
         expensive and is not strictly required to select the parameters that
         yield the best generalization performance.
     """
-    def __init__(self, estimator, param_grid, scoring=None, cv=None, refit=True, 
-                 verbose=0, n_particles=64, iterations =20, pso_c1 = 0.5, pso_c2 = 0.3, 
-                 pso_w = 0.9, n_jobs=None,  iid = True,pre_dispatch='2*n_jobs',
-                 error_score=np.nan, return_train_score=False):
-        super().__init__(estimator=estimator, scoring=scoring,cv=cv,refit=refit,verbose=verbose,
-             n_jobs=n_jobs, iid=iid, pre_dispatch=pre_dispatch, error_score=error_score, 
-            return_train_score=return_train_score)
+    def __init__(
+        self,
+        estimator,
+        param_grid,
+        scoring=None,
+        cv=None,
+        refit=True,
+        verbose=0,
+        n_particles=64,
+        iterations =20,
+        pso_c1 = 0.5,
+        pso_c2 = 0.3,
+        pso_w = 0.9,
+        n_jobs=None,
+        pre_dispatch='2*n_jobs',
+        error_score=np.nan, return_train_score=False
+    ):
+        super().__init__(
+            estimator=estimator,
+            scoring=scoring,
+            cv=cv,
+            refit=refit,
+            verbose=verbose,
+            n_jobs=n_jobs,
+            pre_dispatch=pre_dispatch,
+            error_score=error_score, 
+            return_train_score=return_train_score
+        )
         self.n_particles=n_particles
         self.iterations = iterations
         self.param_grid = param_grid
@@ -174,13 +195,16 @@ class PSOSearchCV(BaseSearchCV):
         cv_orig = check_cv(self.cv, y, classifier=is_classifier(self.estimator))
         n_splits = cv_orig.get_n_splits(X, y, groups)
         self.cv = cv_orig
-        self.scorers, self.multimetric_ = _check_multimetric_scoring(
-                                        self.estimator, scoring=self.scoring)
-        if self.multimetric_:
+
+        if not isinstance(self.scoring, str):
+            self.scorers = _check_multimetric_scoring(
+                self.estimator, scoring=self.scoring
+            )
+        if hasattr(self, 'multimetric_') and self.multimetric_:
             if self.refit is not False and (
                     not isinstance(self.refit, str) or
                     # This will work for both dict / list (tuple)
-                    self.refit not in scorers) and not callable(self.refit):
+                    self.refit not in self.scorers) and not callable(self.refit):
                 raise ValueError("For multi-metric scoring, the parameter "
                                  "refit must be set to a scorer key or a "
                                  "callable to refit an estimator with the "
@@ -231,7 +255,7 @@ class PSOSearchCV(BaseSearchCV):
             self.refit_time_ = refit_end_time - refit_start_time
 
         # Store the only scorer not as a dict for single metric evaluation
-        self.scorer_ = self.scorers if self.multimetric_ else self.scorers['score']
+        self.scorer_ = self.scorers
 
         self.cv_results_ = results
         self.n_splits_ = n_splits
@@ -242,6 +266,7 @@ class PSOSearchCV(BaseSearchCV):
     def _fit(self, X, y=None, groups = None, parameter_dict= {}):
         self._cv_results = None  # To indicate to the property the need to update
         self.scorer_ = check_scoring(self.estimator, scoring=self.scoring)
+        self.scorers = self.scorer_
         n_samples = _num_samples(X)
 
         if y is not None:
@@ -277,9 +302,11 @@ class PSOSearchCV(BaseSearchCV):
             all_out.extend(out)
             if self.return_train_score:
                 _, test_score_dicts, _, _,_ = zip(*out)
+                test_scores = [n["score"] for n in test_score_dicts]
             else:
-                test_score_dicts, _, _, _ = zip(*out)
-            test_scores = [n["score"] for n in test_score_dicts]
+                test_score_dicts = [o['test_scores'] for o in out]
+                test_scores = [n for n in test_score_dicts]
+
             test_scores = -np.array(test_scores).reshape((len(pos_parameters), n_splits)).mean(axis = 1)
 
             optimizer.update(i, test_scores)
@@ -294,8 +321,8 @@ class PSOSearchCV(BaseSearchCV):
         print('The best position found by pso is: {}'.format(final_best_pos))
         
         results = self._format_results(
-                    all_candidate_params, self.scorers, n_splits, all_out)
-        
+            candidate_params=all_candidate_params, n_splits=n_splits, out=all_out
+        )
         return results
     
     def get_real_position(self, pos):

@@ -1,0 +1,10 @@
+# Cache files
+*.pyc
+__pycache__
+
+# Venv
+.venv
+
+# Build
+dist
+build
